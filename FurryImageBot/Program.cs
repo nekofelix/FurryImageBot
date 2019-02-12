@@ -29,6 +29,7 @@ namespace FurryImageBot
                 await client.StartAsync();
 
                 await services.GetRequiredService<CommandHandlingService>().InitializeAsync(Environment.GetEnvironmentVariable("PREFIXES").Split(","));
+                await services.GetRequiredService<SiteProviderService>().InitializeAsync();
 
                 await Task.Delay(-1);
             }
