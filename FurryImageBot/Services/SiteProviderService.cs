@@ -1,8 +1,11 @@
-﻿using FurryImageBot.Models;
+﻿using Discord;
+using Discord.WebSocket;
+using FurryImageBot.Models;
 using FurryImageBot.SiteProviders;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -17,11 +20,14 @@ namespace FurryImageBot.Services
         private readonly CloudStorageAccount CloudStorageAccount;
         private readonly CloudTableClient CloudTableClient;
         private Task PollerThread;
-        private const int PollerThreadLatency = 1000;
+        private const int PollerThreadLatency = 5000;
         private const string SubscriptionTableName = "SubscriptionTable";
+        private const int MaxReplyLines = 5;
+        private DiscordSocketClient DiscordSocketClient;
 
         public SiteProviderService(IServiceProvider serviceProvider)
         {
+            DiscordSocketClient = serviceProvider.GetRequiredService<DiscordSocketClient>();
             SiteProviders = serviceProvider.GetRequiredService<ISiteProvider[]>();
             CloudStorageAccount = new CloudStorageAccount
                 (
@@ -55,10 +61,10 @@ namespace FurryImageBot.Services
 
             SubscriptionEntity subscriptionEntity = new SubscriptionEntity(partitionKey, query);
             subscriptionEntity.IsPrivate = isPrivate;
-            subscriptionEntity.UserId = userId;
-            subscriptionEntity.ChannelId = channelId;
-            subscriptionEntity.GuildId = guildId;
-            subscriptionEntity.QueryCache = new HashSet<string>(pictures);
+            subscriptionEntity.UserId = userId.ToString();
+            subscriptionEntity.ChannelId = channelId.ToString();
+            subscriptionEntity.GuildId = guildId.ToString();
+            subscriptionEntity.QueryCache = JsonConvert.SerializeObject(pictures);
 
             TableOperation insertOperation = TableOperation.Insert(subscriptionEntity);
 
@@ -80,12 +86,10 @@ namespace FurryImageBot.Services
                 guildId: guildId
             );
 
-            // Construct the query operation for all customer entities where PartitionKey="Smith".
             TableQuery<SubscriptionEntity> query = new TableQuery<SubscriptionEntity>().Where(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey));
 
             CloudTable subscriptionTable = CloudTableClient.GetTableReference(SubscriptionTableName);
 
-            // Print the fields for each customer.
             TableContinuationToken token = null;
             do
             {
@@ -94,7 +98,7 @@ namespace FurryImageBot.Services
 
                 foreach (SubscriptionEntity subscriptionEntity in resultSegment.Results)
                 {
-                    subscriptions.Add(subscriptionEntity.RowKey);
+                    subscriptions.Add(subscriptionEntity.Query);
                 }
             } while (token != null);
 
@@ -114,13 +118,10 @@ namespace FurryImageBot.Services
             CloudTable subscriptionTable = CloudTableClient.GetTableReference(SubscriptionTableName);
             TableOperation retrieveOperation = TableOperation.Retrieve<SubscriptionEntity>(partitionKey, query);
 
-            // Execute the operation.
             TableResult retrievedResult = await subscriptionTable.ExecuteAsync(retrieveOperation);
 
-            // Assign the result to a CustomerEntity object.
             SubscriptionEntity subscriptionEntity = (SubscriptionEntity)retrievedResult.Result;
 
-            // Create the Delete TableOperation and then execute it.
             if (subscriptionEntity == null)
             {
                 return false;
@@ -129,7 +130,6 @@ namespace FurryImageBot.Services
             {
                 TableOperation deleteOperation = TableOperation.Delete(subscriptionEntity);
 
-                // Execute the operation.
                 await subscriptionTable.ExecuteAsync(deleteOperation);
 
                 return true;
@@ -174,12 +174,51 @@ namespace FurryImageBot.Services
             {
                 try
                 {
+                    List<SubscriptionEntity> subscriptions = new List<SubscriptionEntity>();
+
                     CloudTable subscriptionTable = CloudTableClient.GetTableReference(SubscriptionTableName);
 
+                    TableQuery<SubscriptionEntity> query = new TableQuery<SubscriptionEntity>();
 
+                    TableContinuationToken token = null;
+                    do
+                    {
+                        TableQuerySegment<SubscriptionEntity> resultSegment = await subscriptionTable.ExecuteQuerySegmentedAsync(query, token);
+                        token = resultSegment.ContinuationToken;
+                        subscriptions.AddRange(resultSegment.Results);
+                    } while (token != null);
 
-                    
-               
+                    foreach (SubscriptionEntity subscriptionEntity in subscriptions)
+                    {
+                        try
+                        {
+                            List<string> pictureList = new List<string>();
+
+                            foreach (ISiteProvider siteProvider in SiteProviders)
+                            {
+                                List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
+                                pictureList.AddRange(currentPictures);
+                            }
+
+                            HashSet<string> pictureSet = new HashSet<string>(pictureList);
+                            pictureSet.ExceptWith(JsonConvert.DeserializeObject<List<string>>(subscriptionEntity.QueryCache));
+                            if (pictureSet.Count != 0)
+                            {
+                                subscriptionEntity.QueryCache = JsonConvert.SerializeObject(pictureList);
+                                TableOperation insertOperation = TableOperation.Merge(subscriptionEntity);
+                                await subscriptionTable.ExecuteAsync(insertOperation);
+                            }
+                            await SendUpdates(subscriptionEntity, pictureSet);
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e);
+                        }
+                        finally
+                        {
+                            await Task.Delay(PollerThreadLatency);
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -189,6 +228,56 @@ namespace FurryImageBot.Services
                 {
                     await Task.Delay(PollerThreadLatency);
                 }
+            }
+        }
+
+        private async Task SendUpdates(SubscriptionEntity subscriptionEntity, HashSet<string> newPictures)
+        {
+            try
+            {
+                if (newPictures.Count == 0)
+                {
+                    return;
+                }
+
+                string replyString = $"Subscription Update for [{subscriptionEntity.Query}]!";
+                int counter = 1;
+                foreach (string newPicture in newPictures)
+                {
+                    replyString = $"{replyString}\n{newPicture}";
+                    counter++;
+                    if (counter >= MaxReplyLines)
+                    {
+                        if (subscriptionEntity.IsPrivate)
+                        {
+                            IDMChannel channel = await DiscordSocketClient.GetUser(Convert.ToUInt64(subscriptionEntity.UserId)).GetOrCreateDMChannelAsync();
+                            await channel.SendMessageAsync(replyString);
+                        }
+                        else
+                        {
+                            await DiscordSocketClient.GetGuild(Convert.ToUInt64(subscriptionEntity.GuildId)).GetTextChannel(Convert.ToUInt64(subscriptionEntity.ChannelId)).SendMessageAsync(replyString);
+                        }
+                        replyString = "";
+                        counter = 0;
+                    }
+                }
+
+                if (!String.IsNullOrWhiteSpace(replyString))
+                {
+                    if (subscriptionEntity.IsPrivate)
+                    {
+                        IDMChannel channel = await DiscordSocketClient.GetUser(Convert.ToUInt64(subscriptionEntity.UserId)).GetOrCreateDMChannelAsync();
+                        await channel.SendMessageAsync(replyString);
+                    }
+                    else
+                    {
+                        await DiscordSocketClient.GetGuild(Convert.ToUInt64(subscriptionEntity.GuildId)).GetTextChannel(Convert.ToUInt64(subscriptionEntity.ChannelId)).SendMessageAsync(replyString);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
             }
         }
 

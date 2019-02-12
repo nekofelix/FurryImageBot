@@ -17,12 +17,14 @@ namespace FurryImageBot.Models
 
         public bool IsPrivate { get; set; }
 
-        public ulong UserId { get; set; }
+        public string UserId { get; set; }
 
-        public ulong ChannelId { get; set; }
+        public string ChannelId { get; set; }
 
-        public ulong GuildId { get; set; }
+        public string GuildId { get; set; }
 
-        public HashSet<string> QueryCache { get; set; }
+        public string QueryCache { get; set; }
+
+        public string Query { get { return this.RowKey; } }
     }
 }
