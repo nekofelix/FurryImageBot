@@ -18,7 +18,7 @@ namespace FurryImageBot.Services
         private readonly ISiteProvider[] SiteProviders;
         private const int RandomMax = 120;
         private const int SubscriptionMax = 60;
-        private const int CacheMax = 1200;
+        private const int CacheMax = 300;
         private readonly CloudStorageAccount CloudStorageAccount;
         private readonly CloudTableClient CloudTableClient;
         private Task PollerThread;
