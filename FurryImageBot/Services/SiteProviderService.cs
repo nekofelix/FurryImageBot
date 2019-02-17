@@ -8,6 +8,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace FurryImageBot.Services
@@ -17,6 +18,7 @@ namespace FurryImageBot.Services
         private readonly ISiteProvider[] SiteProviders;
         private const int RandomMax = 120;
         private const int SubscriptionMax = 60;
+        private const int CacheMax = 1200;
         private readonly CloudStorageAccount CloudStorageAccount;
         private readonly CloudTableClient CloudTableClient;
         private Task PollerThread;
@@ -43,14 +45,6 @@ namespace FurryImageBot.Services
 
         public async Task<bool> Subscribe(string query, ulong userId, bool isPrivate, ulong channelId, ulong guildId)
         {
-            List<string> pictures = new List<string>();
-
-            foreach (ISiteProvider siteProvider in SiteProviders)
-            {
-                List<string> currentPictures = await siteProvider.QueryByTagAsync(query, SubscriptionMax);
-                pictures.AddRange(currentPictures);
-            }
-
             string partitionKey = GeneratePartitionKey
             (
                 userId: userId, 
@@ -64,7 +58,7 @@ namespace FurryImageBot.Services
             subscriptionEntity.UserId = userId.ToString();
             subscriptionEntity.ChannelId = channelId.ToString();
             subscriptionEntity.GuildId = guildId.ToString();
-            subscriptionEntity.QueryCache = JsonConvert.SerializeObject(pictures);
+            subscriptionEntity.CacheFilled = false;
 
             TableOperation insertOperation = TableOperation.Insert(subscriptionEntity);
 
@@ -192,23 +186,44 @@ namespace FurryImageBot.Services
                     {
                         try
                         {
-                            List<string> pictureList = new List<string>();
-
-                            foreach (ISiteProvider siteProvider in SiteProviders)
+                            if (subscriptionEntity.CacheFilled)
                             {
-                                List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
-                                pictureList.AddRange(currentPictures);
+                                List<List<string>> pictureListList = new List<List<string>>();
+                                foreach (ISiteProvider siteProvider in SiteProviders)
+                                {
+                                    List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
+                                    pictureListList.Add(currentPictures);
+                                }
+                                List<string> interleavedPictureList = pictureListList.Interleave().ToList();
+
+                                HashSet<string> pictureSet = new HashSet<string>(interleavedPictureList);
+                                List<string> currentCache = JsonConvert.DeserializeObject<List<string>>(subscriptionEntity.QueryCache);
+                                pictureSet.ExceptWith(currentCache);
+                                if (pictureSet.Count != 0)
+                                {
+                                    List<string> newCache = interleavedPictureList.Concat(currentCache).Take(CacheMax * SiteProviders.Count()).ToList();
+                                    subscriptionEntity.QueryCache = JsonConvert.SerializeObject(newCache);
+                                    TableOperation insertOperation = TableOperation.Merge(subscriptionEntity);
+                                    await subscriptionTable.ExecuteAsync(insertOperation);
+                                    await SendUpdates(subscriptionEntity, pictureSet);
+                                }
                             }
-
-                            HashSet<string> pictureSet = new HashSet<string>(pictureList);
-                            pictureSet.ExceptWith(JsonConvert.DeserializeObject<List<string>>(subscriptionEntity.QueryCache));
-                            if (pictureSet.Count != 0)
+                            else
                             {
-                                subscriptionEntity.QueryCache = JsonConvert.SerializeObject(pictureList);
+                                subscriptionEntity.CacheFilled = true;
+
+                                List<List<string>> pictureListList = new List<List<string>>();
+                                foreach (ISiteProvider siteProvider in SiteProviders)
+                                {
+                                    List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, CacheMax);
+                                    pictureListList.Add(currentPictures);
+                                }
+                                List<string> interleavedPictureList = pictureListList.Interleave().ToList();
+
+                                subscriptionEntity.QueryCache = JsonConvert.SerializeObject(interleavedPictureList);
                                 TableOperation insertOperation = TableOperation.Merge(subscriptionEntity);
                                 await subscriptionTable.ExecuteAsync(insertOperation);
                             }
-                            await SendUpdates(subscriptionEntity, pictureSet);
                         }
                         catch (Exception e)
                         {

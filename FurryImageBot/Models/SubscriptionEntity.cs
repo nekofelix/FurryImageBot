@@ -26,5 +26,7 @@ namespace FurryImageBot.Models
         public string QueryCache { get; set; }
 
         public string Query { get { return this.RowKey; } }
+
+        public bool CacheFilled { get; set; }
     }
 }
