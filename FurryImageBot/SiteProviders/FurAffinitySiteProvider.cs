@@ -12,7 +12,7 @@ namespace FurryImageBot.SiteProviders
 {
     public class FurAffinitySiteProvider : ISiteProvider
     {
-        private const int MaximumNumberPosts = 60;
+        private const int MaximumNumberPosts = 72;
         private HttpClient HttpClient;
         private SemaphoreSlim FurAffinityThrottleGuard;
         private const int ThrottleTiming = 1000;
@@ -50,7 +50,7 @@ namespace FurryImageBot.SiteProviders
 
         private async Task<List<string>> QueryFurAffinityByTag(string query, int pageNumber)
         {
-            string queryString = $"http://faexport.boothale.net/search.json?perpage=60&page={pageNumber}&q={query}";
+            string queryString = $"http://faexport.boothale.net/search.json?perpage=72&page={pageNumber}&q={query}";
             List<string> furAffinityPosts = await GetFurAffinity(queryString);
             return furAffinityPosts;
         }
