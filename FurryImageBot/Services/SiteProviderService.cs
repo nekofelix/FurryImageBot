@@ -149,8 +149,12 @@ namespace FurryImageBot.Services
 
             foreach (ISiteProvider siteProvider in SiteProviders)
             {
-                List<string> currentPictures = await siteProvider.QueryByTagAsync(query, RandomMax);
-                pictures.AddRange(currentPictures);
+                try
+                {
+                    List<string> currentPictures = await siteProvider.QueryByTagAsync(query, RandomMax);
+                    pictures.AddRange(currentPictures);
+                }
+                catch (Exception) { }
             }
 
             if (pictures.Count == 0)
@@ -191,8 +195,12 @@ namespace FurryImageBot.Services
                                 List<List<string>> pictureListList = new List<List<string>>();
                                 foreach (ISiteProvider siteProvider in SiteProviders)
                                 {
-                                    List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
-                                    pictureListList.Add(currentPictures);
+                                    try
+                                    {
+                                        List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
+                                        pictureListList.Add(currentPictures);
+                                    }
+                                    catch (Exception) { }
                                 }
                                 List<string> interleavedPictureList = pictureListList.Interleave().ToList();
 
@@ -215,8 +223,12 @@ namespace FurryImageBot.Services
                                 List<List<string>> pictureListList = new List<List<string>>();
                                 foreach (ISiteProvider siteProvider in SiteProviders)
                                 {
-                                    List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, CacheMax);
-                                    pictureListList.Add(currentPictures);
+                                    try
+                                    {
+                                        List<string> currentPictures = await siteProvider.QueryByTagAsync(subscriptionEntity.Query, SubscriptionMax);
+                                        pictureListList.Add(currentPictures);
+                                    }
+                                    catch (Exception) { }
                                 }
                                 List<string> interleavedPictureList = pictureListList.Interleave().ToList();
 
