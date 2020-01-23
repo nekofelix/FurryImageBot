@@ -16,9 +16,11 @@ namespace FurryImageBot.SiteProviders
         private HttpClient HttpClient;
         private SemaphoreSlim FurAffinityThrottleGuard;
         private const int ThrottleTiming = 1000;
+        private readonly string FurAffinityAPI;
 
         public FurAffinitySiteProvider()
         {
+            FurAffinityAPI = Environment.GetEnvironmentVariable("FUR_AFFINITY_API");
             HttpClient = new HttpClient();
             FurAffinityThrottleGuard = new SemaphoreSlim(1);
         }
@@ -50,7 +52,7 @@ namespace FurryImageBot.SiteProviders
 
         private async Task<List<string>> QueryFurAffinityByTag(string query, int pageNumber)
         {
-            string queryString = $"http://faexport.boothale.net/search.json?perpage=72&page={pageNumber}&q={query}";
+            string queryString = $"{FurAffinityAPI}/search.json?perpage=72&page={pageNumber}&q={query}";
             List<string> furAffinityPosts = await GetFurAffinity(queryString);
             return furAffinityPosts;
         }

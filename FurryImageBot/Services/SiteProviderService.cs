@@ -22,7 +22,7 @@ namespace FurryImageBot.Services
         private readonly CloudStorageAccount CloudStorageAccount;
         private readonly CloudTableClient CloudTableClient;
         private Task PollerThread;
-        private const int PollerThreadLatency = 5000;
+        private const int PollerThreadLatency = 10000;
         private const string SubscriptionTableName = "SubscriptionTable";
         private const int MaxReplyLines = 5;
         private DiscordSocketClient DiscordSocketClient;
