@@ -52,7 +52,7 @@ namespace FurryImageBot.SiteProviders
         // Query the GET e6 Posts List API
         private async Task<List<string>> QueryE6ByTag(string query, int maxPosts, int pageNumber)
         {
-            string queryString = $"https://e621.net/post/index.json?tags={query}&limit={maxPosts}&page={pageNumber}";
+            string queryString = $"https://e621.net/posts.json?tags={query}&limit={maxPosts}&page={pageNumber}";
             List<string> E6Posts = await GetE6(queryString);
             return E6Posts;
         }
@@ -66,8 +66,8 @@ namespace FurryImageBot.SiteProviders
             using (JsonReader jsonReader = new JsonTextReader(streamReader))
             {
                 JsonSerializer jsonSerializer = new JsonSerializer();
-                IEnumerable<E6Post> e6PostJson = await Task.Run(() => jsonSerializer.Deserialize<IEnumerable<E6Post>>(jsonReader));
-                e6Posts = e6PostJson.Select(x => x.Id.ToString()).ToList();
+                E6Posts e6PostJson = await Task.Run(() => jsonSerializer.Deserialize<E6Posts>(jsonReader));
+                e6Posts = e6PostJson.Posts.Select(x => x.Id.ToString()).ToList();
             }
             return e6Posts;
         }
@@ -94,6 +94,12 @@ namespace FurryImageBot.SiteProviders
                 E621ThrottleGuard.Release();
             }
             return stream;
+        }
+
+        public class E6Posts
+        {
+            [JsonProperty("posts")]
+            public IEnumerable<E6Post> Posts { get; set; }
         }
 
         public class E6Post
